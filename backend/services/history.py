@@ -3,38 +3,27 @@ import json
 import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Any
-from pathlib import Path
-
+from backend.utils.storage import get_storage
 
 class HistoryService:
     def __init__(self):
-        self.history_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "history"
-        )
-        os.makedirs(self.history_dir, exist_ok=True)
-
-        self.index_file = os.path.join(self.history_dir, "index.json")
+        self.storage = get_storage()
+        self.index_file = "history/index.json"
         self._init_index()
 
     def _init_index(self):
-        if not os.path.exists(self.index_file):
-            with open(self.index_file, "w", encoding="utf-8") as f:
-                json.dump({"records": []}, f, ensure_ascii=False, indent=2)
+        if not self.storage.exists(self.index_file):
+            self.storage.save(self.index_file, {"records": []})
 
     def _load_index(self) -> Dict:
-        try:
-            with open(self.index_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return {"records": []}
+        data = self.storage.load(self.index_file, as_json=True)
+        return data if data else {"records": []}
 
     def _save_index(self, index: Dict):
-        with open(self.index_file, "w", encoding="utf-8") as f:
-            json.dump(index, f, ensure_ascii=False, indent=2)
+        self.storage.save(self.index_file, index)
 
     def _get_record_path(self, record_id: str) -> str:
-        return os.path.join(self.history_dir, f"{record_id}.json")
+        return f"history/{record_id}.json"
 
     def create_record(
         self,
@@ -55,13 +44,12 @@ class HistoryService:
                 "task_id": task_id,
                 "generated": []
             },
-            "status": "draft",  # draft/generating/completed/partial
+            "status": "draft",
             "thumbnail": None
         }
 
         record_path = self._get_record_path(record_id)
-        with open(record_path, "w", encoding="utf-8") as f:
-            json.dump(record, f, ensure_ascii=False, indent=2)
+        self.storage.save(record_path, record)
 
         index = self._load_index()
         index["records"].insert(0, {
@@ -79,15 +67,7 @@ class HistoryService:
 
     def get_record(self, record_id: str) -> Optional[Dict]:
         record_path = self._get_record_path(record_id)
-
-        if not os.path.exists(record_path):
-            return None
-
-        try:
-            with open(record_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
-            return None
+        return self.storage.load(record_path, as_json=True)
 
     def update_record(
         self,
@@ -117,8 +97,7 @@ class HistoryService:
             record["thumbnail"] = thumbnail
 
         record_path = self._get_record_path(record_id)
-        with open(record_path, "w", encoding="utf-8") as f:
-            json.dump(record, f, ensure_ascii=False, indent=2)
+        self.storage.save(record_path, record)
 
         index = self._load_index()
         for idx_record in index["records"]:
@@ -141,23 +120,13 @@ class HistoryService:
             return False
 
         if record.get("images") and record["images"].get("generated"):
-            output_dir = os.path.join(
-                os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-                "output"
-            )
+            # Delete images
             for img_file in record["images"]["generated"]:
-                img_path = os.path.join(output_dir, img_file)
-                if os.path.exists(img_path):
-                    try:
-                        os.remove(img_path)
-                    except Exception as e:
-                        print(f"删除图片失败: {img_file}, {e}")
+                img_path = f"output/{img_file}"
+                self.storage.delete(img_path)
 
         record_path = self._get_record_path(record_id)
-        try:
-            os.remove(record_path)
-        except Exception:
-            return False
+        self.storage.delete(record_path)
 
         index = self._load_index()
         index["records"] = [r for r in index["records"] if r["id"] != record_id]
@@ -218,9 +187,7 @@ class HistoryService:
             "by_status": status_count
         }
 
-
 _service_instance = None
-
 
 def get_history_service() -> HistoryService:
     global _service_instance

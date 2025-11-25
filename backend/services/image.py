@@ -8,6 +8,7 @@ from typing import Dict, Any, Generator, List, Optional, Tuple
 from backend.config import Config
 from backend.generators.factory import ImageGeneratorFactory
 from backend.utils.image_compressor import compress_image
+from backend.utils.storage import get_storage
 
 
 class ImageService:
@@ -41,12 +42,8 @@ class ImageService:
         # 加载提示词模板
         self.prompt_template = self._load_prompt_template()
 
-        # 输出目录
-        self.output_dir = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-            "output"
-        )
-        os.makedirs(self.output_dir, exist_ok=True)
+        # 初始化存储
+        self.storage = get_storage()
 
         # 存储任务状态（用于重试）
         self._task_states: Dict[str, Dict] = {}
@@ -63,7 +60,7 @@ class ImageService:
 
     def _save_image(self, image_data: bytes, filename: str) -> str:
         """
-        保存图片到本地
+        保存图片
 
         Args:
             image_data: 图片二进制数据
@@ -72,10 +69,9 @@ class ImageService:
         Returns:
             保存的文件路径
         """
-        filepath = os.path.join(self.output_dir, filename)
-        with open(filepath, "wb") as f:
-            f.write(image_data)
-        return filepath
+        path = f"output/{filename}"
+        self.storage.save(path, image_data)
+        return path
 
     def _generate_single_image(
         self,
@@ -255,9 +251,8 @@ class ImageService:
                 self._task_states[task_id]["generated"][index] = filename
 
                 # 读取封面图片作为参考，并立即压缩到200KB以内
-                cover_path = os.path.join(self.output_dir, filename)
-                with open(cover_path, "rb") as f:
-                    cover_image_data = f.read()
+                cover_path = f"output/{filename}"
+                cover_image_data = self.storage.load(cover_path)
 
                 # 压缩封面图（减少内存占用和后续传输开销）
                 cover_image_data = compress_image(cover_image_data, max_size_kb=200)
@@ -519,8 +514,7 @@ class ImageService:
                             "data": {
                                 "index": index,
                                 "status": "error",
-                                "message": error,
-                                "retryable": True
+                                "message": error
                             }
                         }
 
@@ -531,68 +525,14 @@ class ImageService:
                         "data": {
                             "index": page["index"],
                             "status": "error",
-                            "message": str(e),
-                            "retryable": True
+                            "message": str(e)
                         }
                     }
 
         yield {
             "event": "retry_finish",
             "data": {
-                "success": failed_count == 0,
-                "total": total,
-                "completed": success_count,
-                "failed": failed_count
+                "success_count": success_count,
+                "failed_count": failed_count
             }
         }
-
-    def regenerate_image(
-        self,
-        task_id: str,
-        page: Dict,
-        use_reference: bool = True
-    ) -> Dict[str, Any]:
-        """
-        重新生成图片（用户手动触发，即使成功的也可以重新生成）
-
-        Args:
-            task_id: 任务ID
-            page: 页面数据
-            use_reference: 是否使用封面作为参考
-
-        Returns:
-            生成结果
-        """
-        return self.retry_single_image(task_id, page, use_reference)
-
-    def get_image_path(self, filename: str) -> str:
-        """
-        获取图片完整路径
-
-        Args:
-            filename: 文件名
-
-        Returns:
-            完整路径
-        """
-        return os.path.join(self.output_dir, filename)
-
-    def get_task_state(self, task_id: str) -> Optional[Dict]:
-        """获取任务状态"""
-        return self._task_states.get(task_id)
-
-    def cleanup_task(self, task_id: str):
-        """清理任务状态（释放内存）"""
-        if task_id in self._task_states:
-            del self._task_states[task_id]
-
-
-# 全局服务实例
-_service_instance = None
-
-def get_image_service() -> ImageService:
-    """获取全局图片生成服务实例"""
-    global _service_instance
-    if _service_instance is None:
-        _service_instance = ImageService()
-    return _service_instance
