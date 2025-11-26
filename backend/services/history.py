@@ -2,12 +2,14 @@ import json
 import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Any
+from backend.utils.storage import get_storage
 from backend.storage import get_storage
 
 
 class HistoryService:
     def __init__(self):
         self.storage = get_storage()
+        self.index_file = "history/index.json"
         self._init_index()
 
     def _init_index(self):

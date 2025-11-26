@@ -75,74 +75,135 @@
 
 ---
 
-## 📦 如何自己部署
+## ⚙️ Configuration & Deployment
 
-> 后续考虑发docker版本的，目前还是需要麻烦一点。
+This guide covers environment variables, local development setup, and Vercel deployment options.
 
-### 前置要求
+### 1. Environment Variables
+
+Configure these variables in your `.env` file (local) or Vercel Project Settings (production).
+
+| Variable | Required | Default | Description | Where to Retrieve |
+| :--- | :--- | :--- | :--- | :--- |
+| `GOOGLE_CLOUD_API_KEY` | **Yes** | - | API Key for Google Gemini (Text & Image) | [Google AI Studio](https://aistudio.google.com/) |
+| `IMAGE_API_KEY` | No | - | API Key for Custom Image Provider | Your provider dashboard |
+| `TEXT_API_KEY` | No | - | API Key for Custom Text Provider | Your provider dashboard |
+| `TEXT_API_BASE_URL` | No | `https://api.bltcy.ai` | Base URL for Custom Text Provider | Your provider docs |
+| `FLASK_DEBUG` | No | `True` | Debug mode toggle | - |
+| `FLASK_HOST` | No | `0.0.0.0` | Server host | - |
+| `FLASK_PORT` | No | `12398` | Server port | - |
+| `CORS_ORIGINS` | No | `http://localhost:5173...` | Allowed CORS origins | - |
+| `OUTPUT_DIR` | No | `output` | Local image output directory | - |
+| `STORAGE_BACKEND` | No | `local` | Storage backend (`local`, `vercel_blob`, `vercel_kv`) | - |
+| `VERCEL_BLOB_READ_WRITE_TOKEN`| No | - | Vercel Blob Token | Vercel Dashboard (Storage) |
+| `VERCEL_KV_REST_API_URL` | No | - | Vercel KV URL | Vercel Dashboard (Storage) |
+| `VERCEL_KV_REST_API_TOKEN` | No | - | Vercel KV Token | Vercel Dashboard (Storage) |
+| `IMAGE_PROVIDER` | No | `google_genai` | Active image provider name | - |
+
+### 2. Image Provider Configuration Strategies
+
+RedInk offers two ways to configure image providers:
+
+| Feature | Option A: Config File (`image_providers.yaml`) | Option B: Env-Only |
+| :--- | :--- | :--- |
+| **Setup Complexity** | Higher (requires managing YAML file) | Lower (just env vars) |
+| **Provider Support** | **All** (Custom, OpenAI, Google, etc.) | **Google Gemini Only** |
+| **Flexibility** | High (detailed params per provider) | Low (defaults only) |
+| **Deployment** | Must commit file or allow in `.gitignore` | Easy (just set envs) |
+| **Best For** | Power users, Custom APIs, multiple providers | Quick start, Google users |
+
+### 3. Local Development Setup
+
+**Prerequisites:**
 - Python 3.11+
-- Node.js 18+
-- pnpm
-- uv
+- Node.js 18+ & pnpm
+- [uv](https://github.com/astral-sh/uv) (Python package manager)
 
-### 1. 克隆项目
-```bash
-git clone https://github.com/HisMax/RedInk.git
-cd RedInk
-```
+#### Option A: With `image_providers.yaml` (Recommended for Custom Providers)
 
-### 2. 配置环境变量
-```bash
-cp .env.example .env
-cp image_providers.yaml.example image_providers.yaml
-```
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/HisMax/RedInk.git
+   cd RedInk
+   ```
 
-编辑 `.env` 文件，填入你的 API Key
+2. **Configure Environment:**
+   ```bash
+   cp .env.example .env
+   cp image_providers.yaml.example image_providers.yaml
+   ```
+   - Edit `.env` with your API keys.
+   - Edit `image_providers.yaml` to configure your specific provider (e.g., `active_provider: image_api`).
 
-编辑 `image_providers.yaml` 文件，配置图片生成服务：
-- 修改 `active_provider` 选择要使用的服务商
-- 在对应服务商的 `base_url` 中填入你的 API 端点地址
-- 确保 `.env` 中配置了对应的 API Key
+3. **Install Dependencies & Run:**
+   ```bash
+   # Backend
+   uv sync
+   uv run python -m backend.app
 
-### 3. 安装后端依赖
-```bash
-uv sync
-```
+   # Frontend (in a new terminal)
+   cd frontend
+   pnpm install
+   pnpm dev
+   ```
 
-### 4. 安装前端依赖
-```bash
-cd frontend
-pnpm install
-```
+#### Option B: Env-Only (Quick Start / Google GenAI)
 
-### 5. 启动服务
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/HisMax/RedInk.git
+   cd RedInk
+   ```
 
-**启动后端:**
-```bash
-uv run python -m backend.app
-```
-访问: http://localhost:12398
+2. **Configure Environment:**
+   ```bash
+   cp .env.example .env
+   ```
+   - Edit `.env` and set `GOOGLE_CLOUD_API_KEY`.
+   - **Skip** creating `image_providers.yaml`. The system will automatically default to Google Gemini configuration.
 
-**启动前端:**
-```bash
-cd frontend
-pnpm dev
-```
-访问: http://localhost:5173
+3. **Install Dependencies & Run:**
+   ```bash
+   # Backend
+   uv sync
+   uv run python -m backend.app
 
----
+   # Frontend (in a new terminal)
+   cd frontend
+   pnpm install
+   pnpm dev
+   ```
 
-## 🚀 Vercel 部署
+### 4. Vercel Deployment
 
-本项目支持一键部署到 Vercel 平台。
+For detailed instructions, see [Vercel Deployment Guide](docs/vercel.md).
 
-详细部署指南请参考文档：[Vercel 部署文档](docs/vercel.md)
+#### Method 1: Using Vercel Dashboard (Recommended)
+1. Fork this repository.
+2. Import project in Vercel Dashboard.
+3. In **Environment Variables**, add the required keys (e.g., `GOOGLE_CLOUD_API_KEY`).
+4. (Optional) Bind **Vercel KV** storage for persistence.
+5. Deploy.
 
-主要步骤：
-1. Fork 本仓库。
-2. 在 Vercel 中导入项目。
-3. 配置环境变量（API Keys, Storage）。
-4. 绑定 Vercel KV 实现数据持久化。
+#### Method 2: Using `vercel.json` & CLI
+1. Configure `vercel.json` (already present) for build settings.
+2. Use Vercel CLI to deploy:
+   ```bash
+   npm i -g vercel
+   vercel link
+   vercel env pull .env.local  # Pull envs if needed
+   vercel deploy
+   ```
+   *Note: Do not commit secrets to `vercel.json`.*
+
+### 5. Troubleshooting
+
+**Common Pitfalls:**
+
+- **`image_providers.yaml` not found:** The system will fallback to the default Google Gemini configuration. If you are trying to use a custom provider, ensure the file exists and is readable.
+- **API Key Errors:** Double-check that `GOOGLE_CLOUD_API_KEY` or `IMAGE_API_KEY` are set correctly in `.env` (local) or Vercel Environment Variables.
+- **Vercel Storage:** If `STORAGE_BACKEND` is set to `vercel_kv` but no database is bound, the app will fail to save history. Check `KV_URL` presence.
+- **Provider Mismatch:** If you set `IMAGE_PROVIDER=image_api` but didn't provide `image_providers.yaml`, the app will fail because `image_api` configuration is missing from the default fallback.
 
 ---
 
@@ -159,41 +220,6 @@ pnpm dev
 - **上传参考图片**: 适合品牌方,保持品牌视觉风格
 - **修改描述词**: 精确控制每一页的内容和构图
 - **重新生成**: 对不满意的页面单独重新生成
-
----
-
-## 🔧 配置说明
-
-### 图片服务商配置
-
-项目支持多个图片生成服务商，配置文件: `image_providers.yaml`
-
-**首次使用:**
-```bash
-cp image_providers.yaml.example image_providers.yaml
-```
-
-然后编辑 `image_providers.yaml`，配置你的图片服务：
-
-```yaml
-active_provider: image_api
-
-providers:
-  image_api:
-    type: image_api
-    api_key_env: IMAGE_API_KEY
-    base_url: https://your-image-api-endpoint.com  # 填写你的API端点
-    model: nano-banana-2
-    default_aspect_ratio: "3:4"  # 小红书标准比例
-```
-
-也支持:
-- Google GenAI (官方)
-- OpenAI DALL-E 3
-- 其他兼容 OpenAI API 的服务
-
-详细配置说明请查看 `image_providers.yaml.example` 文件
-
 
 
 ## ⚠️ 注意事项
