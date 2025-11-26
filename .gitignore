@@ -43,12 +43,15 @@ dist-ssr/
 *~
 .DS_Store
 
-# Environment variables (legacy, no longer used)
+# Environment variables
 .env
 .env.local
 .env.*.local
 
-# Generated files - History directory
+# Generated files
+output/
+
+# History directory
 # 忽略所有 history 目录下的内容
 history/*
 # 但保留 .gitkeep 文件以保持目录结构

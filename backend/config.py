@@ -1,51 +1,102 @@
-import logging
+import os
 import yaml
+import json
+import base64
+import logging
 from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
-
 class Config:
-    DEBUG = True
-    HOST = '0.0.0.0'
-    PORT = 12398
-    CORS_ORIGINS = ['http://localhost:5173', 'http://localhost:3000']
-    OUTPUT_DIR = 'output'
+    # User Customizations for Vercel/Env
+    DEBUG = os.getenv('FLASK_DEBUG', 'True').lower() == 'true'
+    HOST = os.getenv('FLASK_HOST', '0.0.0.0')
+    PORT = int(os.getenv('FLASK_PORT', 5000))
+    CORS_ORIGINS = os.getenv('CORS_ORIGINS', 'http://localhost:5173,http://localhost:3000').split(',')
+    GOOGLE_CLOUD_API_KEY = os.getenv('GOOGLE_CLOUD_API_KEY')
+    OUTPUT_DIR = os.getenv('OUTPUT_DIR', 'output')
+    STORAGE_BACKEND = os.getenv('STORAGE_BACKEND', 'local')
 
     _image_providers_config = None
     _text_providers_config = None
+
+    @staticmethod
+    def _deep_merge(source, destination):
+        for key, value in source.items():
+            if isinstance(value, dict):
+                node = destination.setdefault(key, {})
+                Config._deep_merge(value, node)
+            else:
+                destination[key] = value
+        return destination
 
     @classmethod
     def load_image_providers_config(cls):
         if cls._image_providers_config is not None:
             return cls._image_providers_config
 
-        config_path = Path(__file__).parent.parent / 'image_providers.yaml'
-        logger.debug(f"加载图片服务商配置: {config_path}")
-
-        if not config_path.exists():
-            logger.warning(f"图片配置文件不存在: {config_path}，使用默认配置")
-            cls._image_providers_config = {
-                'active_provider': 'google_genai',
-                'providers': {}
+        # 1. Defaults
+        config = {
+            'active_provider': 'google_genai',
+            'providers': {
+                'google_genai': {
+                    'type': 'google_genai',
+                    'api_key_env': 'GOOGLE_CLOUD_API_KEY',
+                    'model': 'gemini-3-pro-image-preview',
+                    'default_aspect_ratio': '3:4'
+                }
             }
-            return cls._image_providers_config
+        }
 
-        try:
-            with open(config_path, 'r', encoding='utf-8') as f:
-                cls._image_providers_config = yaml.safe_load(f) or {}
-            logger.debug(f"图片配置加载成功: {list(cls._image_providers_config.get('providers', {}).keys())}")
-        except yaml.YAMLError as e:
-            logger.error(f"图片配置文件 YAML 格式错误: {e}")
-            raise ValueError(
-                f"配置文件格式错误: image_providers.yaml\n"
-                f"YAML 解析错误: {e}\n"
-                "解决方案：\n"
-                "1. 检查 YAML 缩进是否正确（使用空格，不要用Tab）\n"
-                "2. 检查引号是否配对\n"
-                "3. 使用在线 YAML 验证器检查格式"
-            )
+        # 2. File Config
+        config_path = Path(__file__).parent.parent / 'image_providers.yaml'
+        if config_path.exists():
+            try:
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    file_config = yaml.safe_load(f)
+                    if file_config and isinstance(file_config, dict):
+                        cls._deep_merge(file_config, config)
+                    logger.debug(f"图片配置加载成功: {list(config.get('providers', {}).keys())}")
+            except Exception as e:
+                logger.error(f"Error loading image_providers.yaml: {e}")
 
+        # Helper to parse env config
+        def parse_and_merge(env_val, source_name):
+            if not env_val:
+                return
+            try:
+                # Try JSON first
+                try:
+                    env_config = json.loads(env_val)
+                except json.JSONDecodeError:
+                    # Try YAML
+                    env_config = yaml.safe_load(env_val)
+                
+                if env_config and isinstance(env_config, dict):
+                    cls._deep_merge(env_config, config)
+                else:
+                    logger.warning(f"Parsed {source_name} is not a dictionary")
+            except Exception as e:
+                logger.error(f"Error parsing {source_name}: {e}")
+
+        # 3. Env Config (Base64)
+        env_b64 = os.getenv('IMAGE_PROVIDERS_CONFIG_BASE64')
+        if env_b64:
+            try:
+                decoded = base64.b64decode(env_b64).decode('utf-8')
+                parse_and_merge(decoded, "IMAGE_PROVIDERS_CONFIG_BASE64")
+            except Exception as e:
+                logger.error(f"Error decoding IMAGE_PROVIDERS_CONFIG_BASE64: {e}")
+
+        # 4. Env Config (Plain)
+        env_plain = os.getenv('IMAGE_PROVIDERS_CONFIG')
+        if env_plain:
+            parse_and_merge(env_plain, "IMAGE_PROVIDERS_CONFIG")
+
+        cls._image_providers_config = config
         return cls._image_providers_config
 
     @classmethod
@@ -85,9 +136,8 @@ class Config:
     @classmethod
     def get_active_image_provider(cls):
         config = cls.load_image_providers_config()
-        active = config.get('active_provider', 'google_genai')
-        logger.debug(f"当前激活的图片服务商: {active}")
-        return active
+        # 允许通过环境变量覆盖
+        return os.getenv('IMAGE_PROVIDER', config.get('active_provider', 'google_genai'))
 
     @classmethod
     def get_image_provider_config(cls, provider_name: str = None):
@@ -96,53 +146,21 @@ class Config:
         if provider_name is None:
             provider_name = cls.get_active_image_provider()
 
-        logger.info(f"获取图片服务商配置: {provider_name}")
+        if provider_name not in config.get('providers', {}):
+            available = ', '.join(config.get('providers', {}).keys())
+            raise ValueError(f"未找到图片生成服务商配置: {provider_name}\n可用的服务商: {available}")
 
-        providers = config.get('providers', {})
-        if not providers:
-            raise ValueError(
-                "未找到任何图片生成服务商配置。\n"
-                "解决方案：\n"
-                "1. 在系统设置页面添加图片生成服务商\n"
-                "2. 或手动编辑 image_providers.yaml 文件\n"
-                "3. 确保文件中有 providers 字段"
-            )
+        provider_config = config['providers'][provider_name].copy()
 
-        if provider_name not in providers:
-            available = ', '.join(providers.keys()) if providers else '无'
-            logger.error(f"图片服务商 [{provider_name}] 不存在，可用服务商: {available}")
-            raise ValueError(
-                f"未找到图片生成服务商配置: {provider_name}\n"
-                f"可用的服务商: {available}\n"
-                "解决方案：\n"
-                "1. 在系统设置页面添加该服务商\n"
-                "2. 或修改 active_provider 为已存在的服务商\n"
-                "3. 检查 image_providers.yaml 文件"
-            )
+        # Handle API Key from Env (User feature)
+        api_key_env = provider_config.get('api_key_env')
+        if api_key_env:
+            provider_config['api_key'] = os.getenv(api_key_env)
 
-        provider_config = providers[provider_name].copy()
-
-        # 验证必要字段
+        # Basic validation
         if not provider_config.get('api_key'):
-            logger.error(f"图片服务商 [{provider_name}] 未配置 API Key")
-            raise ValueError(
-                f"服务商 {provider_name} 未配置 API Key\n"
-                "解决方案：\n"
-                "1. 在系统设置页面编辑该服务商，填写 API Key\n"
-                "2. 或手动在 image_providers.yaml 中添加 api_key 字段"
-            )
-
-        provider_type = provider_config.get('type', provider_name)
-        if provider_type in ['openai', 'openai_compatible', 'image_api']:
-            if not provider_config.get('base_url'):
-                logger.error(f"服务商 [{provider_name}] 类型为 {provider_type}，但未配置 base_url")
-                raise ValueError(
-                    f"服务商 {provider_name} 未配置 Base URL\n"
-                    f"服务商类型 {provider_type} 需要配置 base_url\n"
-                    "解决方案：在系统设置页面编辑该服务商，填写 Base URL"
-                )
-
-        logger.info(f"图片服务商配置验证通过: {provider_name} (type={provider_type})")
+             logger.warning(f"图片服务商 [{provider_name}] 未配置 API Key (config or env)")
+             
         return provider_config
 
     @classmethod
