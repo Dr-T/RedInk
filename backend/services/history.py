@@ -3,6 +3,7 @@ import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Any
 from backend.utils.storage import get_storage
+from backend.storage import get_storage
 
 
 class HistoryService:
